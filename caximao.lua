@@ -76,7 +76,6 @@ local CONFIG = {
 
 local TARGET_ITEM = "Money Printer"
 local visitedServers = {}
-local servers = {}
 
 -- =======================
 -- UI 设置
@@ -92,7 +91,9 @@ local midTextLines = {
     "正在检测",
     "自动换服",
     "作者：细猫游戏解说"
-}local midLabel = Instance.new("TextLabel", ScreenGui)
+}
+
+local midLabel = Instance.new("TextLabel", ScreenGui)
 midLabel.AnchorPoint = Vector2.new(0.5, 0.5)
 midLabel.Position = UDim2.new(0.5, 0, 0.4, 0)
 midLabel.Size = UDim2.new(0.7, 0, 0.35, 0)
@@ -104,22 +105,19 @@ midLabel.TextWrapped = true
 midLabel.TextXAlignment = Enum.TextXAlignment.Center
 midLabel.TextYAlignment = Enum.TextYAlignment.Center
 
-local function animateMidLabel(label, lines, interval)
+-- 动画文字
+task.spawn(function()
     while true do
-        label.Text = ""
-        for _, line in ipairs(lines) do
+        midLabel.Text = ""
+        for _, line in ipairs(midTextLines) do
             for i = 1, #line do
-                label.Text = label.Text .. line:sub(i,i)
-                task.wait(interval)
+                midLabel.Text = midLabel.Text .. line:sub(i,i)
+                task.wait(0.03)
             end
-            label.Text = label.Text .. "\n"
+            midLabel.Text = midLabel.Text .. "\n"
         end
         task.wait(1)
     end
-end
-
-task.spawn(function()
-    animateMidLabel(midLabel, midTextLines, 0.03)
 end)
 
 local function showNotification(text)
@@ -130,6 +128,7 @@ local function showNotification(text)
     })
 end
 
+-- 固定提示通知
 task.spawn(function()
     while true do
         showNotification("如果发现二改会立即删库")
@@ -140,44 +139,52 @@ task.spawn(function()
 end)
 
 -- =======================
--- 随机服务器传送函数
+-- 随机服务器换服函数
 -- =======================
-local function getAvailableServersRandom()
+local function fetchServerList()
     local url = string.format(
         "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
         game.PlaceId
     )
     local response = httpRequest and httpRequest({Url = url, Method = "GET", Timeout = 10})
-    if not response or response.StatusCode ~= 200 then return {} end
+    if not response or response.StatusCode ~= 200 then return nil end
     local data = HttpService:JSONDecode(response.Body)
-    local available = {}
-    for _, server in ipairs(data.data or {}) do
-        if server.playing < server.maxPlayers and server.id ~= game.JobId and not visitedServers[server.id] then
-            table.insert(available, server)
+    if not data or not data.data then return nil end
+
+    local filtered = {}
+    local currentJobId = game.JobId
+    for _, server in ipairs(data.data) do
+        if server.playing < server.maxPlayers and server.id ~= currentJobId and not visitedServers[server.id] then
+            table.insert(filtered, server)
         end
     end
-    return available
+    return filtered
 end
 
-local function tryTeleportRandom()
-    local servers = getAvailableServersRandom()
-    if #servers == 0 then
-        showNotification("未找到可用服务器，稍后重试")
-        task.wait(CONFIG.SERVER_FETCH_RETRY_DELAY)
-        return
-    end
-    local server = servers[math.random(1, #servers)]
-    visitedServers[server.id] = true
+local function teleportToServer(serverId)
     local success, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, localPlayer)
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, serverId, localPlayer)
     end)
     if not success then
-        showNotification("传送失败: " .. tostring(err):sub(1,30))
+        showNotification("传送失败: " .. tostring(err):sub(1, 30))
+        return false
+    end
+    return true
+end
+
+local function teleportToRandomServer()
+    local servers = fetchServerList()
+    if servers and #servers > 0 then
+        local randomServer = servers[math.random(1, #servers)]
+        visitedServers[randomServer.id] = true
+        teleportToServer(randomServer.id)
+    else
+        task.wait(CONFIG.SERVER_FETCH_RETRY_DELAY)
     end
 end
 
 -- =======================
--- 印钞机扫描函数
+-- 扫描 Money Printer
 -- =======================
 local function scanForMoneyPrinters()
     local found = {}
@@ -195,3 +202,18 @@ local function scanForMoneyPrinters()
     end
     return found
 end
+
+-- =======================
+-- 主循环
+-- =======================
+task.spawn(function()
+    while true do
+        local printers = scanForMoneyPrinters()
+        if #printers == 0 then
+            task.wait(3) -- 3秒间隔
+            teleportToRandomServer()
+        else
+            task.wait(3) -- 可以在这里执行拾取逻辑
+        end
+    end
+end)
