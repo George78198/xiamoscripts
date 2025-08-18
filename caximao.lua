@@ -140,46 +140,45 @@ task.spawn(function()
 end)
 
 -- =======================
--- 服务器传送与物品检测
+-- 随机服务器传送函数
 -- =======================
-local function fetchServerList()
+local function getAvailableServersRandom()
     local url = string.format(
         "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
         game.PlaceId
     )
     local response = httpRequest and httpRequest({Url = url, Method = "GET", Timeout = 10})
-    if not response or response.StatusCode ~= 200 then return nil end
+    if not response or response.StatusCode ~= 200 then return {} end
     local data = HttpService:JSONDecode(response.Body)
-    if not data or not data.data then return nil end
-
-    local filtered = {}
-    local currentJobId = game.JobId
-    for _, server in ipairs(data.data) do
-        if server.playing < server.maxPlayers and server.id ~= currentJobId and not visitedServers[server.id] then
-            table.insert(filtered, server)
+    local available = {}
+    for _, server in ipairs(data.data or {}) do
+        if server.playing < server.maxPlayers and server.id ~= game.JobId and not visitedServers[server.id] then
+            table.insert(available, server)
         end
     end
-    return filtered
+    return available
 end
 
-local function teleportToServer(serverId)
+local function tryTeleportRandom()
+    local servers = getAvailableServersRandom()
+    if #servers == 0 then
+        showNotification("未找到可用服务器，稍后重试")
+        task.wait(CONFIG.SERVER_FETCH_RETRY_DELAY)
+        return
+    end
+    local server = servers[math.random(1, #servers)]
+    visitedServers[server.id] = true
     local success, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, serverId, localPlayer)
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, localPlayer)
     end)
     if not success then
-        showNotification("传送失败: " .. tostring(err):sub(1, 30))
-        return false
-    end
-    return true
-end
-
-local function teleportTo(position)
-    if humanoidRootPart then
-        humanoidRootPart.CFrame = position
-        task.wait(0.2)
+        showNotification("传送失败: " .. tostring(err):sub(1,30))
     end
 end
 
+-- =======================
+-- 印钞机扫描函数
+-- =======================
 local function scanForMoneyPrinters()
     local found = {}
     for _, folder in pairs(workspace.Game.Entities.ItemPickup:GetChildren()) do
